@@ -1,0 +1,135 @@
+st_optics <- function(data, eps_s, eps_t, MinPts) {
+  
+  # Compute distance matrices
+  spatial_dist <- as.matrix(dist(cbind(data$latitude, data$longitude)))
+  temporal_dist <- as.matrix(dist(data$date))
+  
+  n <- nrow(data)
+  
+  # Initialize reachability and core distances for both spatial and temporal dimensions
+  data$reachability_distance_spatial <- Inf
+  data$reachability_distance_temporal <- Inf
+  data$core_distance_spatial <- Inf
+  data$core_distance_temporal <- Inf
+  data$processed <- FALSE
+  
+  core_dist <- function(dist_matrix, point, N, MinPts) {
+    if (length(N) >= MinPts) {
+      ordered_distances <- sort(dist_matrix[point, N])
+      return(ordered_distances[MinPts])
+    } else {
+      return(Inf)
+    }
+  }
+  
+  Seeds <- list() # List to store core points (seeds)
+  process_order <- list() # List to store the processing order
+  
+  unprocessed_points <- which(!data$processed)
+  
+  while (length(unprocessed_points) > 0) {
+    p <- unprocessed_points[1]
+    unprocessed_points <- unprocessed_points[-1]
+    
+    if (!data$processed[p]) {
+      data$processed[p] <- TRUE
+      process_order <- c(process_order, list(p)) # Record processing order
+      
+      spatial_condition <- spatial_dist[p, ] <= eps_s
+      temporal_condition <- temporal_dist[p, ] <= eps_t
+      N <- which(spatial_condition & temporal_condition)
+      
+      if (length(N) >= MinPts) {
+        core_dist_spatial <- core_dist(spatial_dist, p, N, MinPts)
+        core_dist_temporal <- core_dist(temporal_dist, p, N, MinPts)
+        
+        data$core_distance_spatial[p] <- core_dist_spatial
+        data$core_distance_temporal[p] <- core_dist_temporal
+        
+        if (!is.infinite(core_dist_spatial) || !is.infinite(core_dist_temporal)) {
+          Seeds <- c(Seeds, list(p)) # Add core point to Seeds
+          queue <- PriorityQueue$new()
+          
+          for (o in N) {
+            if (!data$processed[o]) {
+              new_reach_dist_spatial <- max(core_dist_spatial, spatial_dist[p, o])
+              new_reach_dist_temporal <- max(core_dist_temporal, temporal_dist[p, o])
+              
+              if (is.infinite(data$reachability_distance_spatial[o])) {
+                data$reachability_distance_spatial[o] <- new_reach_dist_spatial
+                queue$insert(o, new_reach_dist_spatial)
+              } else {
+                if (new_reach_dist_spatial < data$reachability_distance_spatial[o]) {
+                  data$reachability_distance_spatial[o] <- new_reach_dist_spatial
+                  queue$update(o, new_reach_dist_spatial)
+                }
+              }
+              
+              if (is.infinite(data$reachability_distance_temporal[o])) {
+                data$reachability_distance_temporal[o] <- new_reach_dist_temporal
+                queue$insert(o, new_reach_dist_temporal)
+              } else {
+                if (new_reach_dist_temporal < data$reachability_distance_temporal[o]) {
+                  data$reachability_distance_temporal[o] <- new_reach_dist_temporal
+                  queue$update(o, new_reach_dist_temporal)
+                }
+              }
+            }
+          }
+          
+          while (!queue$is_empty()) {
+            o <- queue$pop()
+            if (!data$processed[o]) {
+              data$processed[o] <- TRUE
+              process_order <- c(process_order, list(o)) # Record processing order
+              
+              spatial_condition <- spatial_dist[o, ] <= eps_s
+              temporal_condition <- temporal_dist[o, ] <= eps_t
+              N_o <- which(spatial_condition & temporal_condition)
+              
+              if (length(N_o) >= MinPts) {
+                core_dist_spatial_o <- core_dist(spatial_dist, o, N_o, MinPts)
+                core_dist_temporal_o <- core_dist(temporal_dist, o, N_o, MinPts)
+                
+                data$core_distance_spatial[o] <- core_dist_spatial_o
+                data$core_distance_temporal[o] <- core_dist_temporal_o
+                
+                for (o2 in N_o) {
+                  if (!data$processed[o2]) {
+                    new_reach_dist_spatial <- max(core_dist_spatial_o, spatial_dist[o, o2])
+                    new_reach_dist_temporal <- max(core_dist_temporal_o, temporal_dist[o, o2])
+                    
+                    if (is.infinite(data$reachability_distance_spatial[o2])) {
+                      data$reachability_distance_spatial[o2] <- new_reach_dist_spatial
+                      queue$insert(o2, new_reach_dist_spatial)
+                    } else {
+                      if (new_reach_dist_spatial < data$reachability_distance_spatial[o2]) {
+                        data$reachability_distance_spatial[o2] <- new_reach_dist_spatial
+                        queue$update(o2, new_reach_dist_spatial)
+                      }
+                    }
+                    
+                    if (is.infinite(data$reachability_distance_temporal[o2])) {
+                      data$reachability_distance_temporal[o2] <- new_reach_dist_temporal
+                      queue$insert(o2, new_reach_dist_temporal)
+                    } else {
+                      if (new_reach_dist_temporal < data$reachability_distance_temporal[o2]) {
+                        data$reachability_distance_temporal[o2] <- new_reach_dist_temporal
+                        queue$update(o2, new_reach_dist_temporal)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  # Create a data frame with the process order
+  process_order_df <- data[unlist(process_order), c("latitude", "longitude", "date", "reachability_distance_spatial", "reachability_distance_temporal", "core_distance_spatial", "core_distance_temporal")]
+  
+  return(list(data = process_order_df, seeds = data[unlist(Seeds), c("latitude", "longitude", "date", "reachability_distance_spatial", "reachability_distance_temporal", "core_distance_spatial", "core_distance_temporal")]))
+}
