@@ -1,0 +1,66 @@
+ExtractSTDBSCAN_Clustering <- function(data, eps_s, eps_t, MinPts) {
+  # Initialization
+  ClusterId <- 0
+  NOISE <- 0
+  UNDEFINED <- Inf
+  n <- nrow(data)
+  
+  # Ensure reachability distances and core distances are numeric
+  if (!is.numeric(data$reachability_distance_spatial) || !is.numeric(data$reachability_distance_temporal)) {
+    stop("Reachability distances must be numeric")
+  }
+  if (!is.numeric(data$core_distance_spatial) || !is.numeric(data$core_distance_temporal)) {
+    stop("Core distances must be numeric")
+  }
+  
+  # Create a column to store cluster IDs, initializing with NOISE
+  data$cluster_id <- rep(NOISE, n)
+  
+  # Helper function to check if an object is a core object
+  is_core_object <- function(object, eps_s, eps_t) {
+    return(object$core_distance_spatial <= eps_s || object$core_distance_temporal <= eps_t)
+  }
+  
+  # Loop through all objects in the ordered list
+  for (i in 1:n) {
+    Object <- data[i, ]
+    
+    if (is.infinite(Object$reachability_distance_spatial) || Object$reachability_distance_spatial > eps_s ||
+        is.infinite(Object$reachability_distance_temporal) || Object$reachability_distance_temporal > eps_t) {
+      # If either reachability distance is greater than the respective eps, check core distances
+      if (is_core_object(Object, eps_s, eps_t)) {
+        # If either core distance is within the respective eps, start a new cluster
+        ClusterId <- ClusterId + 1
+        data$cluster_id[i] <- ClusterId
+      } else {
+        # Otherwise, mark as NOISE
+        data$cluster_id[i] <- NOISE
+      }
+    } else {
+      # If reachability distances are within eps, assign to the current cluster
+      data$cluster_id[i] <- ClusterId
+    }
+  }
+  
+  # Check the size of each cluster
+  cluster_sizes <- table(data$cluster_id)
+  
+  # Reassign clusters that don't meet the MinPts requirement to NOISE
+  for (cluster_id in names(cluster_sizes)) {
+    if (cluster_id != NOISE && cluster_sizes[cluster_id] < MinPts) {
+      data$cluster_id[data$cluster_id == cluster_id] <- NOISE
+    }
+  }
+  
+  # Renumber clusters to avoid gaps
+  valid_clusters <- sort(unique(data$cluster_id[data$cluster_id != NOISE]))
+  cluster_mapping <- setNames(seq_along(valid_clusters), valid_clusters)
+  
+  for (i in 1:n) {
+    if (data$cluster_id[i] != NOISE) {
+      data$cluster_id[i] <- cluster_mapping[as.character(data$cluster_id[i])]
+    }
+  }
+  
+  return(data)
+}
